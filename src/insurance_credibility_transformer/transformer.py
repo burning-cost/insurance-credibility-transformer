@@ -256,7 +256,8 @@ class CredibilityTransformer(nn.Module):
 
         # Apply link function
         if self.link == "log":
-            mu = torch.exp(log_mu)
+            # Clamp log_mu to prevent overflow (exp(88) ~ float32 max)
+            mu = torch.exp(log_mu.clamp(min=-10.0, max=10.0))
         elif self.link == "softplus":
             mu = nn.functional.softplus(log_mu)
         else:  # identity

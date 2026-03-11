@@ -1,7 +1,10 @@
 """Integration tests: small synthetic data, end-to-end training.
 
-Uses 50 policies, 3 categorical + 2 numerical features.
+Uses 50-100 policies, 3 categorical + 2 numerical features.
 Verifies training reduces loss and model trains without errors.
+
+Note on device: Integration tests force CPU to avoid CUDA determinism issues.
+The base CT is designed to be CPU-trainable (1,746 parameters).
 """
 
 import numpy as np
@@ -14,8 +17,9 @@ from insurance_credibility_transformer import (
     CredibilityTransformerTrainer,
 )
 
-torch.manual_seed(42)
-torch.use_deterministic_algorithms(True)
+# Force CPU for integration tests — model is tiny, CUDA not needed.
+# Training tests explicitly pass device='cpu' to the trainer.
+TEST_DEVICE = "cpu"
 
 
 def make_synthetic_data(n=50, seed=42):
@@ -55,17 +59,20 @@ class TestEndToEndTraining:
             lr=1e-2,
             batch_size=32,
             val_split=0.2,
-            early_stopping_patience=100,  # don't stop early
+            early_stopping_patience=100,  # don't stop early in test
             max_epochs=20,
             n_ensemble=1,
             random_seed=42,
             verbose=0,
+            device=TEST_DEVICE,
         )
         trainer.fit(x_cat, x_num, y, exposure)
 
         history = trainer.train_history[0]
         initial_loss = history["train_loss"][0]
         final_loss = history["train_loss"][-1]
+        assert not np.isnan(initial_loss), "Initial loss is NaN"
+        assert not np.isnan(final_loss), "Final loss is NaN"
         assert final_loss < initial_loss, (
             f"Training did not reduce loss: initial={initial_loss:.4f}, final={final_loss:.4f}"
         )
@@ -78,12 +85,14 @@ class TestEndToEndTraining:
             embed_dim=4,
         )
         trainer = CredibilityTransformerTrainer(
-            model=ct, max_epochs=5, n_ensemble=1, verbose=0, batch_size=30
+            model=ct, max_epochs=5, n_ensemble=1, verbose=0,
+            batch_size=30, device=TEST_DEVICE,
         )
         trainer.fit(x_cat[:50], x_num[:50], y[:50], exposure[:50])
         preds = trainer.predict(x_cat[50:], x_num[50:], exposure[50:])
         assert preds.shape == (10,)
-        assert (preds > 0).all()
+        assert not np.isnan(preds).any(), f"NaN predictions: {preds}"
+        assert (preds > 0).all(), f"Non-positive predictions: {preds}"
 
     def test_ensemble_averages_predictions(self):
         x_cat, x_num, y, exposure = make_synthetic_data(n=60)
@@ -93,7 +102,8 @@ class TestEndToEndTraining:
             embed_dim=4,
         )
         trainer = CredibilityTransformerTrainer(
-            model=ct, max_epochs=3, n_ensemble=3, verbose=0, batch_size=30
+            model=ct, max_epochs=3, n_ensemble=3, verbose=0,
+            batch_size=30, device=TEST_DEVICE,
         )
         trainer.fit(x_cat[:50], x_num[:50], y[:50], exposure[:50])
         assert len(trainer._ensemble_states) == 3
@@ -108,15 +118,19 @@ class TestEndToEndTraining:
             embed_dim=5,
         )
         trainer = CredibilityTransformerTrainer(
-            model=ct, max_epochs=3, n_ensemble=1, verbose=0
+            model=ct, max_epochs=3, n_ensemble=1, verbose=0,
+            device=TEST_DEVICE,
         )
         trainer.fit(x_cat[:50], x_num[:50], y[:50], exposure[:50])
 
-        explainer = AttentionExplainer(ct)
+        # AttentionExplainer works on CPU
+        ct_cpu = ct.to("cpu")
+        explainer = AttentionExplainer(ct_cpu, device="cpu")
         x_cat_t = torch.tensor(x_cat[:20], dtype=torch.long)
         x_num_t = torch.tensor(x_num[:20], dtype=torch.float32)
         P = explainer.cls_attention(x_cat_t, x_num_t)
         assert P.shape == (20,)
+        assert not np.isnan(P).any(), f"NaN attention weights: {P}"
         # P is an attention weight, should be in [0, 1]
         assert (P >= 0).all() and (P <= 1).all()
 
@@ -128,15 +142,18 @@ class TestEndToEndTraining:
             embed_dim=5,
         )
         trainer = CredibilityTransformerTrainer(
-            model=ct, max_epochs=3, n_ensemble=1, verbose=0
+            model=ct, max_epochs=3, n_ensemble=1, verbose=0,
+            device=TEST_DEVICE,
         )
         trainer.fit(x_cat[:50], x_num[:50], y[:50], exposure[:50])
 
-        explainer = AttentionExplainer(ct)
+        ct_cpu = ct.to("cpu")
+        explainer = AttentionExplainer(ct_cpu, device="cpu")
         x_cat_t = torch.tensor(x_cat[:20], dtype=torch.long)
         x_num_t = torch.tensor(x_num[:20], dtype=torch.float32)
         z = explainer.individual_credibility(x_cat_t, x_num_t)
         assert z.shape == (20,)
+        assert not np.isnan(z).any(), f"NaN credibility weights: {z}"
         assert (z >= 0).all() and (z <= 1).all()
 
     def test_explain_feature_attention(self):
@@ -147,11 +164,13 @@ class TestEndToEndTraining:
             embed_dim=5,
         )
         trainer = CredibilityTransformerTrainer(
-            model=ct, max_epochs=3, n_ensemble=1, verbose=0
+            model=ct, max_epochs=3, n_ensemble=1, verbose=0,
+            device=TEST_DEVICE,
         )
         trainer.fit(x_cat[:50], x_num[:50], y[:50], exposure[:50])
 
-        explainer = AttentionExplainer(ct)
+        ct_cpu = ct.to("cpu")
+        explainer = AttentionExplainer(ct_cpu, device="cpu")
         x_cat_t = torch.tensor(x_cat[:20], dtype=torch.long)
         x_num_t = torch.tensor(x_num[:20], dtype=torch.float32)
         feat_attn = explainer.feature_attention(x_cat_t, x_num_t)
@@ -231,3 +250,17 @@ class TestEdgeCases:
         # Identity link: output can be any value, just check shape/not nan
         assert mu.shape == (8,)
         assert not torch.isnan(mu).any()
+
+    def test_zero_exposure(self):
+        """Zero exposure should give zero prediction (rate × 0)."""
+        ct = CredibilityTransformer(
+            cat_cardinalities=[3, 2],
+            n_num_features=2,
+            embed_dim=4,
+        )
+        ct.eval()
+        x_cat = torch.randint(0, 2, (4, 2))
+        x_num = torch.randn(4, 2)
+        exp_zero = torch.zeros(4)
+        mu, _ = ct(x_cat, x_num, exp_zero)
+        assert (mu == 0).all()

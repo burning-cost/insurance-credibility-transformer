@@ -11,7 +11,6 @@ from insurance_credibility_transformer.attention import (
 )
 
 torch.manual_seed(0)
-torch.use_deterministic_algorithms(True)
 
 
 class TestMultiHeadCredibilityAttention:

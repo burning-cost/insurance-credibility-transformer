@@ -104,14 +104,21 @@ class ContextRetriever:
         else:
             # Brute-force: (n_query, n_train)
             sims_all = queries_norm @ self._train_embeddings.T
-            # Top-K for each query
-            k_idx = np.argpartition(-sims_all, K, axis=1)[:, :K]
-            # Sort within top-K
-            row_idx = np.arange(len(queries_norm))[:, None]
-            top_sims = sims_all[row_idx, k_idx]
-            order = np.argsort(-top_sims, axis=1)
-            indices = k_idx[row_idx, order]
-            sims = top_sims[row_idx, order]
+            n_train = sims_all.shape[1]
+            if K >= n_train:
+                # Return all training points sorted by similarity
+                order = np.argsort(-sims_all, axis=1)
+                indices = order[:, :K]
+                row_idx = np.arange(len(queries_norm))[:, None]
+                sims = sims_all[row_idx, indices]
+            else:
+                # argpartition: kth must be in [0, n_train-1]
+                k_idx = np.argpartition(-sims_all, K, axis=1)[:, :K]
+                row_idx = np.arange(len(queries_norm))[:, None]
+                top_sims = sims_all[row_idx, k_idx]
+                order = np.argsort(-top_sims, axis=1)
+                indices = k_idx[row_idx, order]
+                sims = top_sims[row_idx, order]
 
         return indices, sims
 

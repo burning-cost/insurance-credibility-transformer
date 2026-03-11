@@ -10,7 +10,6 @@ from insurance_credibility_transformer.transformer import (
 )
 
 torch.manual_seed(0)
-torch.use_deterministic_algorithms(True)
 
 
 def make_small_ct(**kwargs) -> CredibilityTransformer:

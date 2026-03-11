@@ -12,7 +12,6 @@ from insurance_credibility_transformer.tokenizer import (
 
 # Deterministic tests
 torch.manual_seed(0)
-torch.use_deterministic_algorithms(True)
 
 
 class TestEntityEmbedding:

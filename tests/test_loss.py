@@ -6,7 +6,6 @@ import numpy as np
 
 from insurance_credibility_transformer.loss import GammaDevianceLoss, PoissonDevianceLoss
 
-torch.use_deterministic_algorithms(True)
 
 
 class TestPoissonDevianceLoss:

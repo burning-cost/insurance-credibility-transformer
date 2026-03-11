@@ -16,6 +16,13 @@ the loss receives the raw rate mu_i = pred_i / v_i, then:
 
 Poisson deviance is a strictly consistent scoring rule for the mean.
 Zero claims (Y_i = 0) are handled via the convention 0*log(0) = 0.
+
+Implementation note on torch.where and NaN gradients:
+    torch.where evaluates both branches for gradient computation, so
+    torch.where(y>0, y*log(y/mu), 0) can NaN-poison gradients when y=0
+    because log(0/mu) = -inf and 0 * -inf = NaN in the backward pass.
+    We avoid this by clamping y before log and masking the gradient via
+    multiplication rather than conditional selection.
 """
 
 from __future__ import annotations
@@ -71,12 +78,16 @@ class PoissonDevianceLoss(nn.Module):
         mu = mu.clamp(min=self.eps)  # prevent log(0)
 
         # Deviance contribution: 2 * [mu - Y - Y * log(mu/Y)]
-        # For Y=0: contribution is 2 * mu (since 0*log(0)=0)
-        log_ratio = torch.where(
-            target > 0,
-            target * torch.log(target / mu),
-            torch.zeros_like(target),
-        )
+        # For Y=0: contribution is 2 * mu (since 0*log(0)=0 convention)
+        #
+        # IMPORTANT: we cannot use torch.where(y>0, y*log(y/mu), 0)
+        # because torch.where evaluates both branches in the backward pass,
+        # causing NaN gradients when y=0 (0 * log(0) = 0 * -inf = NaN).
+        # Instead, clamp target to eps before log, then zero-mask the
+        # log term by multiplying by target (which IS zero when y=0).
+        # This gives identical forward values with clean gradients.
+        target_safe = target.clamp(min=self.eps)  # used only in log, not in arithmetic
+        log_ratio = target * torch.log(target_safe / mu)  # y*log(y/mu); 0 when y=0
         deviance = 2.0 * (mu - target + log_ratio)  # (batch,)
 
         # Exposure-weighted mean
