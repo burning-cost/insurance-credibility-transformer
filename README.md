@@ -150,6 +150,23 @@ The base CT gets within 0.13 units of the best deep model with 0.5% as many para
 
 **Why no sklearn dependency**: The API is sklearn-compatible (fit/predict) but doesn't depend on sklearn. The library targets actuaries who may not have sklearn installed, and the Transformer training loop doesn't benefit from sklearn's cross-validation infrastructure.
 
+## Performance
+
+Benchmarked on French MTPL (freMTPL2freq, 610k policies). Full results from arXiv:2409.16653 (base CT) and arXiv:2509.08122 (ICL extension). Out-of-sample Poisson deviance x10^-2:
+
+| Model | Deviance | Parameters |
+|-------|----------|------------|
+| Null model | 25.445 | — |
+| GLM | 24.102 | — |
+| FNN ensemble | 23.783 | — |
+| CT nadam ensemble | 23.711 | 1,746 |
+| Deep CT ensemble | 23.577 | ~320K |
+
+The base CT (1,746 params) matches the Credibility TRM (the previous best efficient model) and outperforms the GLM by 0.391 units of deviance, while being interpretable via the individual credibility weights z = 1-P. The ICL extension further improves on the deep CT when a relevant context batch is available (policies from the same scheme or product class whose outcomes are known).
+
+Training time: base CT trains to convergence in under 10 minutes on CPU for 610k policies. Deep CT requires GPU for practical training times (30-60 minutes on a single A100).
+
+
 ## References
 
 - Richman, Scognamiglio & Wüthrich (2024). The Credibility Transformer. arXiv:2409.16653
