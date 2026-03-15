@@ -26,7 +26,7 @@ dependencies = [
 
 [project.optional-dependencies]
 faiss = ["faiss-cpu>=1.7.4"]
-pandas = ["pandas>=1.5"]
+pandas = ["pandas>=2.0"]
 dev = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
